@@ -112,4 +112,16 @@ class GoveeCoordinator(DataUpdateCoordinator):
         await self._api.setColorBuffered(red, green, blue)
 
     async def sendPacketBuffer(self):
+        # Refresh the BLE device reference for user-initiated commands, just as
+        # _async_update_data does for periodic polls.
+        fresh_device = bluetooth.async_ble_device_from_address(
+            self.hass, self.device_address, connectable=True
+        ) or bluetooth.async_ble_device_from_address(
+            self.hass, self.device_address, connectable=False
+        )
+        if fresh_device:
+            self._api.update_ble_device(fresh_device)
         await self._api.sendPacketBuffer()
+        # Push the optimistic state (set by the setters above) to HA immediately
+        # so the UI updates before waiting for the device's confirmation notification.
+        self.async_set_updated_data(self._get_data())

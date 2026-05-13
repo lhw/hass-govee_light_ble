@@ -30,6 +30,7 @@ class GoveeAPI:
         self._packet_buffer = []
         self._client = None
         self._update_callback = update_callback
+        self._ble_lock = asyncio.Lock()
 
     def update_ble_device(self, ble_device: BLEDevice) -> None:
         """Refresh the BLE device reference (e.g. after proxy reconnect)."""
@@ -114,11 +115,15 @@ class GoveeAPI:
         if not self._packet_buffer:
             # nothing to do
             return None
-        await self._ensureConnected()
-        for packet in self._packet_buffer:
-            await self._transmitPacket(packet)
-        await self._clearPacketBuffer()
-        # not disconnecting seems to improve connection speed
+        async with self._ble_lock:
+            if not self._packet_buffer:
+                # Another concurrent send already flushed the buffer
+                return None
+            await self._ensureConnected()
+            for packet in self._packet_buffer:
+                await self._transmitPacket(packet)
+            await self._clearPacketBuffer()
+            # not disconnecting seems to improve connection speed
 
     async def requestStateBuffered(self):
         """ adds a request for the current power state to the transmit buffer """
@@ -141,6 +146,7 @@ class GoveeAPI:
         """ adds the state to the transmit buffer """
         if self.state == state:
             return None  # nothing to do
+        self.state = state  # optimistic update so HA reflects the change immediately
         # 0x1 = ON, Ox0 = OFF
         await self._preparePacket(LedPacketCmd.POWER, [0x1 if state else 0x0])
         await self.requestStateBuffered()
@@ -149,6 +155,7 @@ class GoveeAPI:
         """ adds the brightness to the transmit buffer """
         if self.brightness == brightness:
             return None  # nothing to do
+        self.brightness = brightness  # optimistic update
         # legacy devices 0-255
         payload = round(brightness)
         if self._segmented:
@@ -161,6 +168,7 @@ class GoveeAPI:
         """ adds the color to the transmit buffer """
         if self.color == (red, green, blue):
             return None  # nothing to do
+        self.color = (red, green, blue)  # optimistic update
         if self._segmented:
             await self._preparePacket(LedPacketCmd.COLOR, [LedColorType.SEGMENTS, 0x01, red, green, blue, 0, 0, 0, 0, 0, 0xff, 0xff])
         else:
