@@ -1,6 +1,8 @@
 {
   "name": "hass-govee_light_ble",
-  "image": "mcr.microsoft.com/devcontainers/python:3.14-trixie",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
   "postCreateCommand": "scripts/setup",
   "forwardPorts": [
     8123
