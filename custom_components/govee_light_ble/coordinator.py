@@ -13,6 +13,7 @@ from .api import GoveeAPI
 import logging
 _LOGGER = logging.getLogger(__name__)
 
+
 @dataclass
 class GoveeApiData:
     """Class to hold api data."""
@@ -20,6 +21,7 @@ class GoveeApiData:
     state: bool | None = None
     brightness: int | None = None
     color: tuple[int, ...] | None = None
+
 
 class GoveeCoordinator(DataUpdateCoordinator):
     """My coordinator."""
@@ -34,14 +36,19 @@ class GoveeCoordinator(DataUpdateCoordinator):
         self.device_address = config_entry.data[CONF_ADDRESS]
         self.device_segmented = config_entry.data["segmented"]
 
-        #get connection to bluetooth device
+        # get connection to bluetooth device
         ble_device = bluetooth.async_ble_device_from_address(
+            hass,
+            self.device_address,
+            connectable=True
+        ) or bluetooth.async_ble_device_from_address(
             hass,
             self.device_address,
             connectable=False
         )
         assert ble_device
-        self._api = GoveeAPI(ble_device, self._async_push_data, self.device_segmented)
+        self._api = GoveeAPI(
+            ble_device, self._async_push_data, self.device_segmented)
 
         # Initialise DataUpdateCoordinator
         super().__init__(
@@ -71,6 +78,24 @@ class GoveeCoordinator(DataUpdateCoordinator):
         This is the place to pre-process the data to lookup tables
         so entities can quickly look up their data.
         """
+        # Refresh the BLE device reference before each connection attempt so
+        # that a stale cached advertisement (typically expires after ~15 min)
+        # never prevents reconnection.  Prefer connectable=True so the
+        # ESPHome proxy channel is included; fall back to non-connectable
+        # only as a last resort.
+        fresh_device = bluetooth.async_ble_device_from_address(
+            self.hass, self.device_address, connectable=True
+        ) or bluetooth.async_ble_device_from_address(
+            self.hass, self.device_address, connectable=False
+        )
+        if fresh_device:
+            self._api.update_ble_device(fresh_device)
+        else:
+            _LOGGER.debug(
+                "BLE device %s not in scanner cache; will retry with last known reference",
+                self.device_address,
+            )
+
         await self._api.requestStateBuffered()
         await self._api.requestBrightnessBuffered()
         await self._api.requestColorBuffered()
