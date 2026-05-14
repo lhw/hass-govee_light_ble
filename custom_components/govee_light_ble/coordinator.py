@@ -62,6 +62,11 @@ class GoveeCoordinator(DataUpdateCoordinator):
             service_info: bluetooth.BluetoothServiceInfoBleak,
             change: bluetooth.BluetoothChange,
         ) -> None:
+            # Only accept connectable advertisements so we never overwrite the
+            # ESPHome proxy-aware (connectable) BLEDevice with a non-connectable
+            # passive-scan entry that can't carry GATT traffic.
+            if not service_info.connectable:
+                return
             self._api.update_ble_device(service_info.device)
             _LOGGER.debug(
                 "Refreshed BLE device reference for %s from advertisement"
