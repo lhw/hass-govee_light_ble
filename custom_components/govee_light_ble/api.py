@@ -47,11 +47,22 @@ class GoveeAPI:
         await self._connect()
 
     async def _connect(self):
+        def _on_disconnect(client: BleakClient) -> None:
+            # Clear the client reference so _ensureConnected reconnects
+            # properly instead of reusing a stale "connected" client that
+            # cannot carry traffic.  write_gatt_char(response=False) never
+            # raises on a dead link, which would otherwise leave the entity
+            # stuck at the optimistic state indefinitely.
+            if self._client is client:
+                self._client = None
+                _LOGGER.debug("BLE device %s disconnected", self.address)
+
         self._client = await bleak_retry_connector.establish_connection(
             BleakClient,
             self._ble_device,
             self.address,
             ble_device_callback=lambda: self._ble_device,
+            disconnected_callback=_on_disconnect,
         )
         await self._client.start_notify(READ_CHARACTERISTIC_UUID, self._handleReceive)
 
@@ -85,8 +96,16 @@ class GoveeAPI:
     async def _handleReceive(self, characteristic: BleakGATTCharacteristic, frame: bytearray):
         """ receives packets async """
         if not await GoveeUtils.verifyChecksum(frame):
-            raise Exception(
-                "transmission error, received packet with bad checksum")
+            # Log rather than raise: exceptions raised inside a bleak notify
+            # callback are silently swallowed by asyncio and never reach our
+            # coordinator, causing the optimistic state to persist with no
+            # visible error.
+            _LOGGER.warning(
+                "Received packet with bad checksum from %s: %s",
+                self.address,
+                frame.hex(),
+            )
+            return
 
         packet = LedPacket(
             head=frame[0],
