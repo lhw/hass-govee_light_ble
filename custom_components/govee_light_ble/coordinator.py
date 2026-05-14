@@ -79,7 +79,8 @@ class GoveeCoordinator(DataUpdateCoordinator):
             bluetooth.async_register_callback(
                 hass,
                 _on_ble_advertisement,
-                bluetooth.BluetoothCallbackMatcher(address=self.device_address),
+                bluetooth.BluetoothCallbackMatcher(
+                    address=self.device_address),
                 bluetooth.BluetoothScanningMode.PASSIVE,
             )
         )
@@ -159,3 +160,7 @@ class GoveeCoordinator(DataUpdateCoordinator):
         # Push the optimistic state (set by the setters above) to HA immediately
         # so the UI updates before waiting for the device's confirmation notification.
         self.async_set_updated_data(self._get_data())
+
+    async def close(self) -> None:
+        """Disconnect the BLE client on config entry unload."""
+        await self._api.close()

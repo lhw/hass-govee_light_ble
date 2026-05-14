@@ -73,6 +73,12 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     # Remove the config options update listener
     hass.data[DOMAIN][config_entry.entry_id].cancel_update_listener()
 
+    # Disconnect the BLE GATT connection cleanly so the ESPHome proxy
+    # sends a proper BLE DISCONNECT to the device.  Without this the proxy
+    # retains the handle and the device refuses the next connection attempt
+    # with ESP_GATT_CONN_FAIL_ESTABLISH after an entry reload or HA restart.
+    await hass.data[DOMAIN][config_entry.entry_id].coordinator.close()
+
     # Unload platforms
     unload_ok = await hass.config_entries.async_unload_platforms(
         config_entry, PLATFORMS
