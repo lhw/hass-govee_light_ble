@@ -3,7 +3,7 @@ from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS, CONF_NAME
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.components import bluetooth
 
@@ -49,6 +49,35 @@ class GoveeCoordinator(DataUpdateCoordinator):
         assert ble_device
         self._api = GoveeAPI(
             ble_device, self._async_push_data, self.device_segmented)
+
+        # Register a BLE advertisement callback so that _ble_device is
+        # refreshed immediately whenever the Govee device re-advertises
+        # (e.g. after the scanner cache expires or a GATT disconnect).
+        # This ensures bleak_retry_connector's ble_device_callback always
+        # returns a valid proxy-aware reference even when the scanner cache
+        # has expired (devices stop advertising while GATT-connected, so the
+        # ~195 s cache window can elapse before a reconnect is needed).
+        @callback
+        def _on_ble_advertisement(
+            service_info: bluetooth.BluetoothServiceInfoBleak,
+            change: bluetooth.BluetoothChange,
+        ) -> None:
+            self._api.update_ble_device(service_info.device)
+            _LOGGER.debug(
+                "Refreshed BLE device reference for %s from advertisement"
+                " (RSSI %d dBm)",
+                self.device_address,
+                service_info.rssi,
+            )
+
+        config_entry.async_on_unload(
+            bluetooth.async_register_callback(
+                hass,
+                _on_ble_advertisement,
+                bluetooth.BluetoothCallbackMatcher(address=self.device_address),
+                bluetooth.BluetoothScanningMode.PASSIVE,
+            )
+        )
 
         # Initialise DataUpdateCoordinator
         super().__init__(
