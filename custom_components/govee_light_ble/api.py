@@ -139,10 +139,25 @@ class GoveeAPI:
                 # Another concurrent send already flushed the buffer
                 return None
             await self._ensureConnected()
-            for packet in self._packet_buffer:
-                await self._transmitPacket(packet)
-            await self._clearPacketBuffer()
-            # not disconnecting seems to improve connection speed
+            try:
+                for packet in self._packet_buffer:
+                    await self._transmitPacket(packet)
+            finally:
+                await self._clearPacketBuffer()
+                # Explicitly disconnect so the ESPHome proxy does not retain
+                # a stale GATT connection after each send.  If the Govee device
+                # resets or the BLE link drops at the device side while HA
+                # considers itself still connected, the proxy keeps the handle
+                # open and the device refuses the next connection attempt with
+                # ESP_GATT_CONN_FAIL_ESTABLISH.  Disconnecting cleanly after
+                # every operation prevents that.
+                client = self._client
+                self._client = None  # pre-clear so disconnected_callback is a no-op
+                if client is not None and client.is_connected:
+                    try:
+                        await client.disconnect()
+                    except Exception:  # noqa: BLE001
+                        pass
 
     async def requestStateBuffered(self):
         """ adds a request for the current power state to the transmit buffer """
