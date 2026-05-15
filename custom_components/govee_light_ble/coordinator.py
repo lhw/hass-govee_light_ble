@@ -92,9 +92,12 @@ class GoveeCoordinator(DataUpdateCoordinator):
             name=f"{DOMAIN} ({config_entry.unique_id})",
             # Set update method to get devices on first load.
             update_method=self._async_update_data,
-            # Do not set a polling interval as data will be pushed.
-            # You can remove this line but left here for explanatory purposes.
-            update_interval=timedelta(seconds=15)
+            # 60-second poll interval.  Each poll is a full connect →
+            # interact → disconnect cycle (~1.5 s); polling every 15 s
+            # creates ~240 cycles/hour which the H615A firmware cannot
+            # sustain.  At 60 s we do 60 cycles/hour with a ~2.5 % duty
+            # cycle, well within the device's tolerance.
+            update_interval=timedelta(seconds=60)
         )
         # Exponential backoff state.  After consecutive connection failures
         # the poll interval grows (15 s → 30 s → 60 s → 120 s → 300 s) so
@@ -143,10 +146,10 @@ class GoveeCoordinator(DataUpdateCoordinator):
         except Exception:
             # Exponential backoff: slow down retries so we don’t flood the
             # device with BLE CONNECT requests while it’s stuck.
-            # Sequence: 30 s → 60 s → 120 s → 240 s → 300 s (max 5 min).
+            # Base is 60 s (normal interval); sequence: 120 s → 240 s → 300 s.
             self._consecutive_failures += 1
             backoff_s = min(
-                300, 15 * (2 ** min(self._consecutive_failures, 4)))
+                300, 60 * (2 ** min(self._consecutive_failures, 2)))
             self.update_interval = timedelta(seconds=backoff_s)
             _LOGGER.debug(
                 "Connection to %s failed (consecutive failures: %d);"
@@ -158,7 +161,7 @@ class GoveeCoordinator(DataUpdateCoordinator):
         # Success — reset backoff to normal poll rate.
         if self._consecutive_failures:
             self._consecutive_failures = 0
-            self.update_interval = timedelta(seconds=15)
+            self.update_interval = timedelta(seconds=60)
         return self._get_data()
 
     async def setStateBuffered(self, state: bool):

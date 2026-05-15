@@ -149,17 +149,39 @@ class GoveeAPI:
             self._packet_buffer = []
             if not packets:
                 return None
-            await self._ensureConnected()
-            for packet in packets:
-                await self._transmitPacket(packet)
-            # Keep the connection open between polls.  Disconnecting and
-            # reconnecting every 15 s causes ~70-100+ cycles/hour; Govee
-            # firmware gets stuck after ~60-100 cycles and refuses new
-            # connections (ESP_GATT_CONN_FAIL_ESTABLISH) until power-cycled.
-            # The connection is closed cleanly by close() when the config
-            # entry is unloaded.  Unexpected drops are handled by the
-            # disconnected_callback in _connect() which clears _client so
-            # _ensureConnected reconnects on the next call.
+            try:
+                await self._ensureConnected()
+                for packet in packets:
+                    await self._transmitPacket(packet)
+                # Give the device time to send notification responses before
+                # we disconnect.  Govee devices respond within ~50–150 ms;
+                # 500 ms is a safe margin.  The event loop runs freely during
+                # this sleep so _handleReceive is called with state data.
+                await asyncio.sleep(0.5)
+            finally:
+                # Always disconnect after each interaction.
+                #
+                # The H615A firmware crashes (BLE stack dead, hard reset
+                # required) when a GATT connection is held open for more than
+                # ~2–4 minutes — likely a firmware memory leak or watchdog
+                # issue.  The Govee app follows a short connect–interact–
+                # disconnect pattern; maintaining a persistent connection is
+                # outside what the device was designed for.
+                #
+                # Use try/finally so we disconnect even when a write fails,
+                # preventing ghost GATT handles in the ESPHome proxy that
+                # would cause ESP_GATT_CONN_FAIL_ESTABLISH on the next poll.
+                client = self._client
+                self._client = None  # pre-clear so disconnected_callback is a no-op
+                if client is not None and client.is_connected:
+                    try:
+                        await client.stop_notify(READ_CHARACTERISTIC_UUID)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    try:
+                        await client.disconnect()
+                    except Exception:  # noqa: BLE001
+                        pass
 
     async def close(self) -> None:
         """Disconnect the GATT client and release the BLE connection.
