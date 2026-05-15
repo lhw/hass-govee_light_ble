@@ -145,7 +145,8 @@ class GoveeCoordinator(DataUpdateCoordinator):
             # device with BLE CONNECT requests while it’s stuck.
             # Sequence: 30 s → 60 s → 120 s → 240 s → 300 s (max 5 min).
             self._consecutive_failures += 1
-            backoff_s = min(300, 15 * (2 ** min(self._consecutive_failures, 4)))
+            backoff_s = min(
+                300, 15 * (2 ** min(self._consecutive_failures, 4)))
             self.update_interval = timedelta(seconds=backoff_s)
             _LOGGER.debug(
                 "Connection to %s failed (consecutive failures: %d);"

@@ -17,6 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.LIGHT]
 
+
 @dataclass
 class RuntimeData:
     """Class to hold your data."""
@@ -24,12 +25,13 @@ class RuntimeData:
     coordinator: DataUpdateCoordinator
     cancel_update_listener: Callable
 
+
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Set up Integration from a config entry."""
 
     hass.data.setdefault(DOMAIN, {})
 
-    #look for device
+    # look for device
     device_address = config_entry.data[CONF_ADDRESS]
     if not bluetooth.async_ble_device_from_address(hass, device_address, False):
         raise ConfigEntryNotReady(
@@ -46,7 +48,8 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
 
     # Initialise a listener for config flow options changes.
     # See config_flow for defining an options setting that shows up as configure on the integration.
-    cancel_update_listener = config_entry.add_update_listener(_async_update_listener)
+    cancel_update_listener = config_entry.add_update_listener(
+        _async_update_listener)
 
     # Add the coordinator and update listener to hass data to make
     hass.data[DOMAIN][config_entry.entry_id] = RuntimeData(
@@ -60,10 +63,12 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
     # Return true to denote a successful setup.
     return True
 
+
 async def _async_update_listener(hass: HomeAssistant, config_entry):
     """Handle config options update."""
     # Reload the integration when the options change.
     await hass.config_entries.async_reload(config_entry.entry_id)
+
 
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Unload a config entry."""
@@ -91,9 +96,11 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     # Return that unloading was successful.
     return unload_ok
 
+
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     """Migrate old entry."""
-    _LOGGER.debug("Migrating configuration from version %s", config_entry.version)
+    _LOGGER.debug("Migrating configuration from version %s",
+                  config_entry.version)
 
     if config_entry.version == 1:
         hass.config_entries.async_update_entry(config_entry, data={
@@ -102,6 +109,7 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry):
             "segmented": True
         }, version=2)
 
-    _LOGGER.debug("Migration to configuration version %s successful", config_entry.version)
+    _LOGGER.debug(
+        "Migration to configuration version %s successful", config_entry.version)
 
     return True
