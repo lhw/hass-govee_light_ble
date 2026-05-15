@@ -96,6 +96,10 @@ class GoveeCoordinator(DataUpdateCoordinator):
             # You can remove this line but left here for explanatory purposes.
             update_interval=timedelta(seconds=15)
         )
+        # Exponential backoff state.  After consecutive connection failures
+        # the poll interval grows (15 s → 30 s → 60 s → 120 s → 300 s) so
+        # we stop flooding the device with BLE CONNECT requests.
+        self._consecutive_failures: int = 0
 
     def _get_data(self):
         return GoveeApiData(
@@ -131,10 +135,29 @@ class GoveeCoordinator(DataUpdateCoordinator):
                 self.device_address,
             )
 
-        await self._api.requestStateBuffered()
-        await self._api.requestBrightnessBuffered()
-        await self._api.requestColorBuffered()
-        await self._api.sendPacketBuffer()
+        try:
+            await self._api.requestStateBuffered()
+            await self._api.requestBrightnessBuffered()
+            await self._api.requestColorBuffered()
+            await self._api.sendPacketBuffer()
+        except Exception:
+            # Exponential backoff: slow down retries so we don’t flood the
+            # device with BLE CONNECT requests while it’s stuck.
+            # Sequence: 30 s → 60 s → 120 s → 240 s → 300 s (max 5 min).
+            self._consecutive_failures += 1
+            backoff_s = min(300, 15 * (2 ** min(self._consecutive_failures, 4)))
+            self.update_interval = timedelta(seconds=backoff_s)
+            _LOGGER.debug(
+                "Connection to %s failed (consecutive failures: %d);"
+                " next poll in %d s",
+                self.device_address, self._consecutive_failures, backoff_s,
+            )
+            raise
+
+        # Success — reset backoff to normal poll rate.
+        if self._consecutive_failures:
+            self._consecutive_failures = 0
+            self.update_interval = timedelta(seconds=15)
         return self._get_data()
 
     async def setStateBuffered(self, state: bool):

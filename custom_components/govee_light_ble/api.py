@@ -63,6 +63,12 @@ class GoveeAPI:
             self.address,
             ble_device_callback=lambda: self._ble_device,
             disconnected_callback=_on_disconnect,
+            # Limit to 2 attempts (≈2 BLE CONNECT requests per failure).
+            # The original default of 9 caused ~4 500 connection requests
+            # over 10 hours when the device was stuck, crashing its BLE
+            # stack.  Exponential backoff in the coordinator handles
+            # sustained outages.
+            max_attempts=2,
         )
         await self._client.start_notify(READ_CHARACTERISTIC_UUID, self._handleReceive)
 
@@ -135,13 +141,17 @@ class GoveeAPI:
             # nothing to do
             return None
         async with self._ble_lock:
-            if not self._packet_buffer:
-                # Another concurrent send already flushed the buffer
+            # Drain the buffer immediately so packets added by concurrent
+            # callers while we hold the lock are not lost, and so that a
+            # failed connection never leaves stale packets that accumulate
+            # into a massive burst when the device eventually reconnects.
+            packets = self._packet_buffer
+            self._packet_buffer = []
+            if not packets:
                 return None
             await self._ensureConnected()
-            for packet in self._packet_buffer:
+            for packet in packets:
                 await self._transmitPacket(packet)
-            await self._clearPacketBuffer()
             # Keep the connection open between polls.  Disconnecting and
             # reconnecting every 15 s causes ~70-100+ cycles/hour; Govee
             # firmware gets stuck after ~60-100 cycles and refuses new
@@ -170,20 +180,22 @@ class GoveeAPI:
 
     async def requestStateBuffered(self):
         """ adds a request for the current power state to the transmit buffer """
-        await self._preparePacket(LedPacketCmd.POWER, request=True)
+        # repeat=1: one REQUEST packet is enough; the device always responds.
+        # The original default of 3 tripled the GATT write rate for no gain.
+        await self._preparePacket(LedPacketCmd.POWER, request=True, repeat=1)
 
     async def requestBrightnessBuffered(self):
         """ adds a request for the current brightness state to the transmit buffer """
-        await self._preparePacket(LedPacketCmd.BRIGHTNESS, request=True)
+        await self._preparePacket(LedPacketCmd.BRIGHTNESS, request=True, repeat=1)
 
     async def requestColorBuffered(self):
         """ adds a request for the current color state to the transmit buffer """
         if self._segmented:
             # 0x01 means first segment
-            await self._preparePacket(LedPacketCmd.SEGMENT, b'\x01', request=True)
+            await self._preparePacket(LedPacketCmd.SEGMENT, b'\x01', request=True, repeat=1)
         else:
             # legacy devices
-            await self._preparePacket(LedPacketCmd.COLOR, request=True)
+            await self._preparePacket(LedPacketCmd.COLOR, request=True, repeat=1)
 
     async def setStateBuffered(self, state: bool):
         """ adds the state to the transmit buffer """
