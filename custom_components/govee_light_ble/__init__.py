@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from enum import IntEnum
+from collections.abc import Callable
 from dataclasses import dataclass
 from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
+from homeassistant.const import CONF_ADDRESS, CONF_NAME, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.const import CONF_ADDRESS
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .coordinator import GoveeCoordinator
 from .const import DOMAIN
@@ -31,9 +31,13 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
 
     hass.data.setdefault(DOMAIN, {})
 
-    # look for device
+    # Look for the device the same way the coordinator does. ESPHome-proxied
+    # devices may only be available as connectable=True entries.
     device_address = config_entry.data[CONF_ADDRESS]
-    if not bluetooth.async_ble_device_from_address(hass, device_address, False):
+    ble_device = bluetooth.async_ble_device_from_address(
+        hass, device_address, True
+    ) or bluetooth.async_ble_device_from_address(hass, device_address, False)
+    if not ble_device:
         raise ConfigEntryNotReady(
             f"Could not find LED BLE device with address {device_address}"
         )
@@ -103,8 +107,12 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry):
                   config_entry.version)
 
     if config_entry.version == 1:
+        unique_id = config_entry.unique_id
+        if unique_id is None:
+            _LOGGER.error("Cannot migrate govee_light_ble entry without unique_id")
+            return False
         hass.config_entries.async_update_entry(config_entry, data={
-            CONF_ADDRESS: config_entry.unique_id.upper(),
+            CONF_ADDRESS: unique_id.upper(),
             CONF_NAME: config_entry.title,
             "segmented": True
         }, version=2)
