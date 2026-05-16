@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS, CONF_NAME
@@ -92,17 +91,13 @@ class GoveeCoordinator(DataUpdateCoordinator):
             name=f"{DOMAIN} ({config_entry.unique_id})",
             # Set update method to get devices on first load.
             update_method=self._async_update_data,
-            # 60-second poll interval.  Each poll is a full connect →
-            # interact → disconnect cycle (~1.5 s); polling every 15 s
-            # creates ~240 cycles/hour which the H615A firmware cannot
-            # sustain.  At 60 s we do 60 cycles/hour with a ~2.5 % duty
-            # cycle, well within the device's tolerance.
-            update_interval=timedelta(seconds=60)
+            # Do not schedule periodic polls.  For this device family the
+            # only known-safe pattern is short-lived, command-driven BLE
+            # sessions.  Reconnecting periodically just to request state has
+            # been the strongest candidate for the "works briefly, then dies"
+            # regressions on production.
+            update_interval=None,
         )
-        # Exponential backoff state.  After consecutive connection failures
-        # the poll interval grows (15 s → 30 s → 60 s → 120 s → 300 s) so
-        # we stop flooding the device with BLE CONNECT requests.
-        self._consecutive_failures: int = 0
 
     def _get_data(self):
         return GoveeApiData(
@@ -137,30 +132,10 @@ class GoveeCoordinator(DataUpdateCoordinator):
                 self.device_address,
             )
 
-        try:
-            await self._api.requestStateBuffered()
-            await self._api.requestBrightnessBuffered()
-            await self._api.requestColorBuffered()
-            await self._api.sendPacketBuffer()
-        except Exception:
-            # Exponential backoff: slow down retries so we don’t flood the
-            # device with BLE CONNECT requests while it’s stuck.
-            # Base is 60 s (normal interval); sequence: 120 s → 240 s → 300 s.
-            self._consecutive_failures += 1
-            backoff_s = min(
-                300, 60 * (2 ** min(self._consecutive_failures, 2)))
-            self.update_interval = timedelta(seconds=backoff_s)
-            _LOGGER.debug(
-                "Connection to %s failed (consecutive failures: %d);"
-                " next poll in %d s",
-                self.device_address, self._consecutive_failures, backoff_s,
-            )
-            raise
-
-        # Success — reset backoff to normal poll rate.
-        if self._consecutive_failures:
-            self._consecutive_failures = 0
-            self.update_interval = timedelta(seconds=60)
+        await self._api.requestStateBuffered()
+        await self._api.requestBrightnessBuffered()
+        await self._api.requestColorBuffered()
+        await self._api.sendPacketBuffer()
         return self._get_data()
 
     async def setStateBuffered(self, state: bool):
