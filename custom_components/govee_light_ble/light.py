@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -55,6 +56,26 @@ class GoveeBluetoothLight(CoordinatorEntity, LightEntity):
     @callback
     def _handle_coordinator_update(self) -> None:
         self.async_write_ha_state()
+
+    @property
+    def available(self) -> bool:
+        """Return availability based on Bluetooth presence.
+
+        In the current command-driven design we intentionally avoid periodic
+        GATT polling, so `CoordinatorEntity.available` is too pessimistic: it
+        only reflects whether the last refresh succeeded.  Once that flag goes
+        false the entity can stay unavailable indefinitely even while Home
+        Assistant still sees the light advertising.
+
+        Availability should track scanner presence instead.  Commands still use
+        the connectable path only; this wider check is just for the frontend
+        availability state.
+        """
+        return bluetooth.async_address_present(
+            self.coordinator.hass, self.coordinator.device_address, connectable=True
+        ) or bluetooth.async_address_present(
+            self.coordinator.hass, self.coordinator.device_address, connectable=False
+        )
 
     @property
     def brightness(self):

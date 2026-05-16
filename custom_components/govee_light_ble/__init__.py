@@ -109,7 +109,8 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     if config_entry.version == 1:
         unique_id = config_entry.unique_id
         if unique_id is None:
-            _LOGGER.error("Cannot migrate govee_light_ble entry without unique_id")
+            _LOGGER.error(
+                "Cannot migrate govee_light_ble entry without unique_id")
             return False
         hass.config_entries.async_update_entry(config_entry, data={
             CONF_ADDRESS: unique_id.upper(),
