@@ -45,9 +45,12 @@ class GoveeCoordinator(DataUpdateCoordinator):
             self.device_address,
             connectable=False
         )
-        assert ble_device
         self._api = GoveeAPI(
-            ble_device, self._async_push_data, self.device_segmented)
+            ble_device,
+            self.device_address,
+            self._async_push_data,
+            self.device_segmented,
+        )
 
         # Register a BLE advertisement callback so that _ble_device is
         # refreshed immediately whenever the Govee device re-advertises

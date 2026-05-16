@@ -5,6 +5,7 @@ from bleak import (
     BleakClient,
     BLEDevice
 )
+from homeassistant.exceptions import HomeAssistantError
 from .const import WRITE_CHARACTERISTIC_UUID, READ_CHARACTERISTIC_UUID
 from .api_utils import (
     LedPacketHead,
@@ -23,8 +24,15 @@ class GoveeAPI:
     brightness: int | None = None
     color: tuple[int, ...] | None = None
 
-    def __init__(self, ble_device: BLEDevice, update_callback, segmented: bool = False):
+    def __init__(
+        self,
+        ble_device: BLEDevice | None,
+        address: str,
+        update_callback,
+        segmented: bool = False,
+    ):
         self._conn = None
+        self._address = address
         self._ble_device = ble_device
         self._segmented = segmented
         self._packet_buffer = []
@@ -38,12 +46,16 @@ class GoveeAPI:
 
     @property
     def address(self):
-        return self._ble_device.address
+        return self._ble_device.address if self._ble_device is not None else self._address
 
     async def _ensureConnected(self):
         """ connects to a bluetooth device """
         if self._client != None and self._client.is_connected:
             return None
+        if self._ble_device is None:
+            raise HomeAssistantError(
+                f"BLE device {self.address} is not currently in Home Assistant's scanner cache"
+            )
         await self._connect()
 
     async def _connect(self):

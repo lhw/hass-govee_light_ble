@@ -31,24 +31,31 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
 
     hass.data.setdefault(DOMAIN, {})
 
-    # Look for the device the same way the coordinator does. ESPHome-proxied
-    # devices may only be available as connectable=True entries.
     device_address = config_entry.data[CONF_ADDRESS]
-    ble_device = bluetooth.async_ble_device_from_address(
-        hass, device_address, True
-    ) or bluetooth.async_ble_device_from_address(hass, device_address, False)
-    if not ble_device:
-        raise ConfigEntryNotReady(
-            f"Could not find LED BLE device with address {device_address}"
-        )
 
     # Initialise the coordinator that manages data updates from your api.
     # This is defined in coordinator.py
     coordinator = GoveeCoordinator(hass, config_entry)
 
-    # Perform an initial data load from api.
-    # async_config_entry_first_refresh() is special in that it does not log errors if it fails
-    await coordinator.async_config_entry_first_refresh()
+    # Only do an initial refresh if the device is already in scanner history.
+    # This device may be perfectly healthy yet temporarily absent from HA's
+    # current bluetooth cache (for example after a restart, while another
+    # client recently connected, or before the next advertisement arrives).
+    # In that case we still set up the entity and wait for rediscovery.
+    ble_device = bluetooth.async_ble_device_from_address(
+        hass, device_address, True
+    ) or bluetooth.async_ble_device_from_address(hass, device_address, False)
+    if ble_device:
+        await coordinator.async_config_entry_first_refresh()
+    else:
+        bluetooth.async_rediscover_address(hass, device_address)
+        coordinator.data = coordinator._get_data()
+        coordinator.last_update_success = True
+        _LOGGER.debug(
+            "Setting up govee_light_ble for %s without an initial BLE cache hit;"
+            " waiting for rediscovery",
+            device_address,
+        )
 
     # Initialise a listener for config flow options changes.
     # See config_flow for defining an options setting that shows up as configure on the integration.
