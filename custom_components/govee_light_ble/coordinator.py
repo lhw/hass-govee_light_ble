@@ -120,21 +120,20 @@ class GoveeCoordinator(DataUpdateCoordinator):
         This is the place to pre-process the data to lookup tables
         so entities can quickly look up their data.
         """
-        # Refresh the BLE device reference before each connection attempt so
-        # that a stale cached advertisement (typically expires after ~15 min)
-        # never prevents reconnection.  Prefer connectable=True so the
-        # ESPHome proxy channel is included; fall back to non-connectable
-        # only as a last resort.
+        # Refresh the BLE device reference before each connection attempt, but
+        # only from connectable history.  Falling back to connectable=False
+        # here can overwrite a proxy-aware BLEDevice with a non-connectable
+        # scanner entry right when the 195 s connectable cache expires,
+        # causing the next connection attempt to fail immediately.
         fresh_device = bluetooth.async_ble_device_from_address(
             self.hass, self.device_address, connectable=True
-        ) or bluetooth.async_ble_device_from_address(
-            self.hass, self.device_address, connectable=False
         )
         if fresh_device:
             self._api.update_ble_device(fresh_device)
         else:
             _LOGGER.debug(
-                "BLE device %s not in scanner cache; will retry with last known reference",
+                "BLE device %s not in connectable scanner cache; will retry"
+                " with last known proxy-aware reference",
                 self.device_address,
             )
 
@@ -178,8 +177,6 @@ class GoveeCoordinator(DataUpdateCoordinator):
         # _async_update_data does for periodic polls.
         fresh_device = bluetooth.async_ble_device_from_address(
             self.hass, self.device_address, connectable=True
-        ) or bluetooth.async_ble_device_from_address(
-            self.hass, self.device_address, connectable=False
         )
         if fresh_device:
             self._api.update_ble_device(fresh_device)
